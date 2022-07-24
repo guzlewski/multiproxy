@@ -11,8 +11,9 @@
 #include <unistd.h>
 
 #define BACKLOG 10
-#define MAXBUF 65535
+#define MAX_BUF 65535
 #define MAX_CONNECTIONS 1024
+#define MAX_SIZE 256
 
 #ifdef LOG
 #define PRINT 1
@@ -22,9 +23,10 @@
 
 typedef struct proxy
 {
-    char localport[256];
-    char hostname[256];
-    char hostport[256];
+    char localhost[MAX_SIZE];
+    char localport[MAX_SIZE];
+    char remotehost[MAX_SIZE];
+    char remoteport[MAX_SIZE];
     int serverfd;
 } proxy;
 
@@ -32,7 +34,7 @@ typedef struct buff
 {
     int start;
     int left;
-    char content[MAXBUF];
+    char content[MAX_BUF];
 } buff;
 
 typedef struct connection
@@ -81,11 +83,15 @@ int main(int argc, char **argv)
         printf("Too much proxies!\nLoaded: %d, limit: %d\n", proxiesCount, MAX_CONNECTIONS - 1);
         exit(0);
     }
+    else if (proxiesCount == 0)
+    {
+        printf("No proxies loaded\n");
+        exit(0);
+    }
     else
     {
         printf("Loaded proxies: %d\n", proxiesCount);
     }
-    
 
     if (((epollfd = epoll_create1(0)) == -1))
     {
@@ -94,7 +100,7 @@ int main(int argc, char **argv)
 
     for (int i = 0; i < proxiesCount; i++)
     {
-        serverfd = CreateServerSocket(NULL, p[i].localport);
+        serverfd = CreateServerSocket(p[i].localhost, p[i].localport);
 
         connections[i].fd[0] = serverfd;
         connections[i].p = proxies + i;
@@ -279,7 +285,7 @@ int ParseArgs(int *argc, char **argv, proxy *proxies)
     if (*argc == 1)
     {
         printf("Usage:\n");
-        printf("\t%s local_port:host:host_port ...\n", argv[0]);
+        printf("\t%s local_host:local_port:remote_host:remote_port ...\n", argv[0]);
         exit(0);
     }
 
@@ -291,7 +297,7 @@ int ParseArgs(int *argc, char **argv, proxy *proxies)
         char *token = strtok(argv[i], ":");
         int valid = 1;
 
-        for (int j = 0; j < 3; j++)
+        for (int j = 0; j < 4; j++)
         {
             if (token == NULL)
             {
@@ -299,16 +305,26 @@ int ParseArgs(int *argc, char **argv, proxy *proxies)
                 break;
             }
 
+            if (strlen(token) >= MAX_SIZE)
+            {
+                fprintf(stderr, "Invalid argument '%s', max length %d\n", token, MAX_SIZE);
+                valid = 0;
+                break;
+            }
+
             switch (j)
             {
             case 0:
-                memcpy(p.localport, token, strlen(token));
+                memcpy(p.localhost, token, strlen(token) + 1);
                 break;
             case 1:
-                memcpy(p.hostname, token, strlen(token));
+                memcpy(p.localport, token, strlen(token) + 1);
                 break;
             case 2:
-                memcpy(p.hostport, token, strlen(token));
+                memcpy(p.remotehost, token, strlen(token) + 1);
+                break;
+            case 3:
+                memcpy(p.remoteport, token, strlen(token) + 1);
                 break;
             }
 
@@ -327,7 +343,7 @@ int ParseArgs(int *argc, char **argv, proxy *proxies)
 
 proxy *FindProxy(int fd)
 {
-    for (proxy *p = proxies; p != NULL && p->hostname != NULL; p++)
+    for (proxy *p = proxies; p != NULL && p->remotehost != NULL; p++)
     {
         if (p->serverfd == fd)
         {
@@ -375,14 +391,14 @@ void AddConnection(int serverfd)
 
         if (PRINT)
         {
-            printf("Dropped connection from %s to %s -> %s:%s, fd %d\n", error, p->localport, p->hostname, p->hostport, localfd);
+            printf("Dropped connection %s:%s -> %s:%s, fd %d\n", error, p->localport, p->remotehost, p->remoteport, localfd);
         }
 
         close(localfd);
         return;
     }
 
-    remotefd = CreateClientSocket(p->hostname, p->hostport);
+    remotefd = CreateClientSocket(p->remotehost, p->remoteport);
 
     AddToPoll(EPOLLIN | EPOLLET, localfd);
     AddToPoll(EPOLLIN | EPOLLET, remotefd);
@@ -407,7 +423,7 @@ void AddConnection(int serverfd)
 
     if (PRINT)
     {
-        printf("New connection from %s to %s -> %s:%s, (%d, %d) -> (%d, %d)\n", empty->ip, p->localport, p->hostname, p->hostport, empty->fd[0], empty->fd[1], empty->fd[2], empty->fd[3]);
+        printf("New connection %s:%s -> %s:%s, (%d, %d) -> (%d, %d)\n", empty->ip, p->localport, p->remotehost, p->remoteport, empty->fd[0], empty->fd[1], empty->fd[2], empty->fd[3]);
     }
 }
 
@@ -437,7 +453,7 @@ void CloseConnection(connection *c)
 
     if (PRINT)
     {
-        printf("Closed connection from %s to %s -> %s:%s, (%d, %d) -> (%d, %d)\n", c->ip, c->p->localport, c->p->hostname, c->p->hostport, c->fd[0], c->fd[1], c->fd[2], c->fd[3]);
+        printf("Closed connection %s:%s -> %s:%s, (%d, %d) -> (%d, %d)\n", c->ip, c->p->localport, c->p->remotehost, c->p->remoteport, c->fd[0], c->fd[1], c->fd[2], c->fd[3]);
     }
 
     memset(c, 0, sizeof(connection));
@@ -499,7 +515,7 @@ void SendRecv(int from, int to, int *readReady, int *writeReady, buff *b, connec
             }
         }
 
-        if ((n = read(from, b->content, MAXBUF)) > 0)
+        if ((n = read(from, b->content, MAX_BUF)) > 0)
         {
             b->start = 0;
             b->left = n;
