@@ -1,8 +1,6 @@
 # multiproxy
-Multiproxy is high performance tcp proxy server with ability to listen on many ports and send to many hosts.  
-Supports up to 1023 proxies and 1024 active connections at the same time (can be increased easly if needed).  
-Thanks to epoll() is very fast and low cpu usage (all operations are non blocking and edge triggered).  
-It can proxy ssl traffic and files uploading / downloading (eg. scp).   
+Multiproxy is a high-performance TCP proxy server capable to run multiple proxies at the same time. Supports up to 1023 proxies and 1024 active connections (configured in source code). It's a single-threaded and single-process application using epoll() for non-blocking and edge-triggered operations.  
+It can proxy any TCP traffic including TLS and file transferring (e.g. scp, ssh).
 
 ## Compilation
 ```bash
@@ -11,10 +9,10 @@ cd multiproxy
 make
 make nolog
 ```
+`make nolog` - enable log output to console
 `make nolog` - disable log output to console, may improve performance
 
 ## Usage
-
 ```
 ./multiproxy.out local_host1:local_port1:remote_host1:remote_port1 local_host2:local_port2:remote_host2:remote_port2 [...]
 ```
